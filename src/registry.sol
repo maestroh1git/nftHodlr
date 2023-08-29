@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 //openzeppelin contract address generator ish
 import "@openzeppelin/contracts/utils/Create2.sol";
 
-
 //Registry Interface
 interface IERC6551Registry {
     event AccountCreated(

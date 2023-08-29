@@ -9,7 +9,7 @@
 //2+- NFT inherits soulbound ERC5114, so we cant transfer it out
 //3+- ERC-6551 Registry and Account allows NFT to own smartcontract account
 //4+- NFT is bound to account in registry, so NFT can own stuff
-//Testing....... 
+//Testing.......
 // #TODO deploy registry, deploy account, use deployment addresses to deploy implementation
 //5?- 725, hold storage of NFTs and perhaps owners or assets owned by NFT
 
@@ -22,8 +22,6 @@
 
 // soulToTokenToStorage[owner][tokenId]
 
-
-
 //implement ERC725x and ERC725y
 //x - is the data storage
 // key is user address
@@ -33,10 +31,7 @@
 // it allows, a user to call a function as a signer of another account?
 // i want my nft to transfer tokens to someone else
 // i call the executor it gets my nft accountAddress from ERC725x, and signature with EIP712
-// and executes the transaction 
-
-
-
+// and executes the transaction
 
 //in essesnce
 /**
@@ -50,7 +45,8 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
-import "./registryAbstraction.sol";
+import "./registry.sol";
+import "./ERC725Y.sol";
 
 interface IERC5114 {
     // fired anytime a new instance of this badge is minted
@@ -65,10 +61,9 @@ interface IERC5114 {
     // this function **MUST** throw if the badge hasn't been minted yet
     // this function **MUST** always return the same result every time it is called after it has been minted
     // this function **MUST** return the same value as found in the original `Mint` event for the badge
-    function ownerOf(uint256 badgeId)
-        external
-        view
-        returns (address nftAddress, uint256 nftTokenId);
+    function ownerOf(
+        uint256 badgeId
+    ) external view returns (address nftAddress, uint256 nftTokenId);
 
     // returns a URI with details about this badge collection
     // the metadata returned by this is merged with the metadata return by `badgeUri(uint256)`
@@ -86,10 +81,9 @@ interface IERC5114 {
     // the collectionUri **MUST** be content addressable (e.g., ipfs:// and not http://)
     // data from this takes precedence over data returned by `collectionUri`
     // any external links referenced by the content at `badgeUri` also **MUST** follow all of the above rules
-    function tokenUri(uint256 tokenId)
-        external
-        view
-        returns (string memory tokenUri);
+    function tokenUri(
+        uint256 tokenId
+    ) external view returns (string memory tokenUri);
 
     // returns a string that indicates the format of the `badgeUri` and `collectionUri` results (e.g., 'EIP-ABCD' or 'soulbound-schema-version-4')
     function metadataFormat() external pure returns (string memory format);
@@ -98,6 +92,7 @@ interface IERC5114 {
 contract ImpTheGoat is Ownable, IERC5114 {
     using Counters for Counters.Counter;
     using Strings for uint256;
+    ERC725 _tokenStorage;
 
     // Mapping from `Soul address, Soul tokenId` to token balance
     // mapping(address => mapping(uint256 => uint256)) internal _soulData;
@@ -110,8 +105,12 @@ contract ImpTheGoat is Ownable, IERC5114 {
 
     // mapping(uint256 => address) public soulTokenToOwner;
 
-//this event is for querying, to get who owns what nft and what account is connected to it,
-//eventhough ERC6551 has its own event fot this purpose
+    mapping(bytes32 => bytes) private _store;
+
+    mapping(address => ERC725) public tokenData;
+
+    //this event is for querying, to get who owns what nft and what account is connected to it,
+    //eventhough ERC6551 has its own event fot this purpose
     event TokenAccountCreatedForSoul(
         address indexed soul,
         address indexed account,
@@ -123,24 +122,23 @@ contract ImpTheGoat is Ownable, IERC5114 {
 
     Counters.Counter private _tokenIdCounter;
     //An account Abstraction Registry
-    IERC6551Registry public ERC6551Registry;
+    IERC6551Registry public erc6551Registry;
     //An Account Abstraction Implementation - It is the smart contract wallet bound to the NFT
-    address public ERC6551AccountImplementation;
+    address public erc6551AccountImplementation;
 
     constructor(
         string memory _collectionURI,
         string memory _tokenURI,
-
         //we pass in the address of the registry and the account implementation in the constructor
-        address _ERC6551Registry,
-        address _ERC6551AccountImplementation
+        address _erc6551Registry,
+        address _erc6551AccountImplementation
     ) {
         collectionInfo = _collectionURI;
         tokenInfo = _tokenURI;
 
         //Initialize the registry and the account implementation address
-        ERC6551Registry = IERC6551Registry(_ERC6551Registry);
-        ERC6551AccountImplementation = _ERC6551AccountImplementation;
+        erc6551Registry = IERC6551Registry(_erc6551Registry);
+        erc6551AccountImplementation = _erc6551AccountImplementation;
     }
 
     function safeMint() public onlyOwner {
@@ -149,19 +147,16 @@ contract ImpTheGoat is Ownable, IERC5114 {
         _mint(tokenId);
 
         require(
-            tokenAccountCreation(tokenId, msg.sender),
+            _tokenAccountCreation(tokenId, msg.sender),
             "Failed To Create Account For Token"
         );
     }
 
     // Returns Soul address and Soul token id
     //should take in the badge(we dont need it, since we are using the nft as the badge)
-    function _getSoul(uint256 _tokenId)
-        internal
-        view
-        virtual
-        returns (address, uint256)
-    {
+    function _getSoul(
+        uint256 _tokenId
+    ) internal view virtual returns (address, uint256) {
         address soulAddress = tokenToAddresses[_tokenId];
         require(
             soulAddress != address(0),
@@ -169,37 +164,46 @@ contract ImpTheGoat is Ownable, IERC5114 {
         );
         return (soulAddress, _tokenId);
     }
-//uses the ERC6551 to create an account bound to the token
-    function tokenAccountCreation(uint256 _tokenId, address _soul)
-        internal
-        returns (bool)
-    {
-        address newAccount = ERC6551Registry.createAccount(
-            ERC6551AccountImplementation,
+
+    //uses the ERC6551 to create an account bound to the token
+    function _tokenAccountCreation(
+        uint256 _tokenId,
+        address _soul
+    ) internal returns (bool) {
+        address newAccount = erc6551Registry.createAccount(
+            erc6551AccountImplementation,
             block.chainid,
             address(this),
             _tokenId,
             0,
             abi.encodeWithSignature("initialize()", msg.sender)
         );
-//emit the address that owns the token, the address of the token account and the tokenID in an event
+        //emit the address that owns the token, the address of the token account and the tokenID in an event
         emit TokenAccountCreatedForSoul(_soul, newAccount, _tokenId);
 
-        //
+        //add the token account to the tokenData storage mapping (725)
+        require(createInstanceForAddress(newAccount), "Unable to create tokenAccount Storage Instance");
 
         return true;
     }
-//This returns the account assigned to the token
-    function showTokenAccount(uint256 _tokenId) external view returns (address) {
-        return ERC6551Registry.account(ERC6551AccountImplementation, block.chainid, address(this), _tokenId, 0);
+
+    //This returns the account assigned to the token
+    function showTokenAccount(
+        uint256 _tokenId
+    ) external view returns (address) {
+        return
+            erc6551Registry.account(
+                erc6551AccountImplementation,
+                block.chainid,
+                address(this),
+                _tokenId,
+                0
+            );
     }
 
-    function ownerOf(uint256 tokenId)
-        external
-        view
-        virtual
-        returns (address, uint256)
-    {
+    function ownerOf(
+        uint256 tokenId
+    ) external view virtual returns (address, uint256) {
         return _getSoul(tokenId);
     }
 
@@ -237,13 +241,9 @@ contract ImpTheGoat is Ownable, IERC5114 {
             '"image": {"type": "string","description": "A URI pointing to a resource with mime type image/* representing the asset to which this NFT represents. Consider making any images at a width between 320 and 1080 pixels and aspect ratio between 1.91:1 and 4:5 inclusive."}}}';
     }
 
-    function tokenUri(uint256 tokenId)
-        external
-        view
-        virtual
-        override
-        returns (string memory)
-    {
+    function tokenUri(
+        uint256 tokenId
+    ) external view virtual override returns (string memory) {
         return
             bytes(tokenInfo).length > 0
                 ? string(
@@ -251,4 +251,30 @@ contract ImpTheGoat is Ownable, IERC5114 {
                 )
                 : "";
     }
+
+
+    function createInstanceForAddress(address tokenAccount) public returns (bool){
+        address cont = address(tokenData[tokenAccount]);
+        require(cont == address(0), "Instance already created");
+        ERC725 tkn = new ERC725();
+        tokenData[tokenAccount] = tkn;
+        return true;
+    }
+
+     function setDataSingle(address tokenAccount, bytes32 _key, bytes memory _value) public {
+        ERC725 shard = tokenData[tokenAccount];
+        shard.setDataSingle(_key, _value);
+    }
+    function setDataBulk(address tokenAccount, bytes32[] memory _key, bytes[] memory _value) public {
+        ERC725 shard = tokenData[tokenAccount];
+        shard.setData(_key, _value);
+    }
+    function getData(address _addr ,bytes32 _dataKey) public view returns (bytes memory){
+        ERC725 shard = tokenData[_addr];
+        return shard.getData(_dataKey);
+    }
+    function getDataBulk( address _addr, bytes32[] memory _datakey) public view returns(bytes[] memory){
+        ERC725 shard = tokenData[_addr];
+        return shard.getDataBulk(_datakey);
+        }
 }
