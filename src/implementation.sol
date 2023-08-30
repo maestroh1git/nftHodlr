@@ -182,7 +182,16 @@ contract ImpTheGoat is Ownable, IERC5114 {
         emit TokenAccountCreatedForSoul(_soul, newAccount, _tokenId);
 
         //add the token account to the tokenData storage mapping (725)
-        require(createInstanceForAddress(newAccount), "Unable to create tokenAccount Storage Instance");
+        require(
+            createInstanceForAddress(newAccount),
+            "Unable to create tokenAccount Storage Instance"
+        );
+
+        ERC725 newStorage = ERC725(newAccount);
+        newStorage.setDataSingle(
+            keccak256(abi.encodePacked(msg.sender)),
+            abi.encodePacked(_soul, newAccount, _tokenId)
+        );
 
         return true;
     }
@@ -252,8 +261,9 @@ contract ImpTheGoat is Ownable, IERC5114 {
                 : "";
     }
 
-
-    function createInstanceForAddress(address tokenAccount) public returns (bool){
+    function createInstanceForAddress(
+        address tokenAccount
+    ) public returns (bool) {
         address cont = address(tokenData[tokenAccount]);
         require(cont == address(0), "Instance already created");
         ERC725 tkn = new ERC725();
@@ -261,20 +271,37 @@ contract ImpTheGoat is Ownable, IERC5114 {
         return true;
     }
 
-     function setDataSingle(address tokenAccount, bytes32 _key, bytes memory _value) public {
+    function setDataSingle(
+        address tokenAccount,
+        bytes32 _key,
+        bytes memory _value
+    ) public {
         ERC725 shard = tokenData[tokenAccount];
         shard.setDataSingle(_key, _value);
     }
-    function setDataBulk(address tokenAccount, bytes32[] memory _key, bytes[] memory _value) public {
+
+    function setDataBulk(
+        address tokenAccount,
+        bytes32[] memory _key,
+        bytes[] memory _value
+    ) public {
         ERC725 shard = tokenData[tokenAccount];
         shard.setData(_key, _value);
     }
-    function getData(address _addr ,bytes32 _dataKey) public view returns (bytes memory){
+
+    function getData(
+        address _addr,
+        bytes32 _dataKey
+    ) public view returns (bytes memory) {
         ERC725 shard = tokenData[_addr];
         return shard.getData(_dataKey);
     }
-    function getDataBulk( address _addr, bytes32[] memory _datakey) public view returns(bytes[] memory){
+
+    function getDataBulk(
+        address _addr,
+        bytes32[] memory _datakey
+    ) public view returns (bytes[] memory) {
         ERC725 shard = tokenData[_addr];
         return shard.getDataBulk(_datakey);
-        }
+    }
 }
