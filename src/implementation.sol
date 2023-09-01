@@ -162,6 +162,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
             soulAddress != address(0),
             "ERC5114SoulBadge: Soul token owner not found"
         );
+
         return (soulAddress, _tokenId);
     }
 
@@ -176,7 +177,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
             address(this),
             _tokenId,
             0,
-            abi.encodeWithSignature("initialize()", msg.sender)
+            ""
         );
         //emit the address that owns the token, the address of the token account and the tokenID in an event
         emit TokenAccountCreatedForSoul(_soul, newAccount, _tokenId);
@@ -187,10 +188,11 @@ contract ImpTheGoat is Ownable, IERC5114 {
             "Unable to create tokenAccount Storage Instance"
         );
 
-        ERC725 newStorage = ERC725(newAccount);
+        // ERC725 newStorage = ERC725(newAccount);
+        ERC725 newStorage = tokenData[newAccount];
         newStorage.setDataSingle(
-            keccak256(abi.encodePacked(msg.sender)),
-            abi.encodePacked(_soul, newAccount, _tokenId)
+            keccak256(abi.encode(msg.sender)),
+            abi.encode(_soul, newAccount, _tokenId)
         );
 
         return true;
