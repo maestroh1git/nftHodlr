@@ -22,7 +22,7 @@
 
 // soulToTokenToStorage[owner][tokenId]
 
-//implement ERC725x and ERC725y
+//implement ERC725x as executor and ERC725y as storage
 //x - is the data storage
 // key is user address
 // value is nft account address
@@ -46,53 +46,14 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "./registry.sol";
-import "./ERC725Y.sol";
-
-interface IERC5114 {
-    // fired anytime a new instance of this badge is minted
-    // this event **MUST NOT** be fired twice for the same `badgeId`
-    event Mint(
-        uint256 indexed badgeId,
-        address indexed nftAddress,
-        uint256 indexed nftTokenId
-    );
-
-    // returns the NFT that this badge is bound to.
-    // this function **MUST** throw if the badge hasn't been minted yet
-    // this function **MUST** always return the same result every time it is called after it has been minted
-    // this function **MUST** return the same value as found in the original `Mint` event for the badge
-    function ownerOf(
-        uint256 badgeId
-    ) external view returns (address nftAddress, uint256 nftTokenId);
-
-    // returns a URI with details about this badge collection
-    // the metadata returned by this is merged with the metadata return by `badgeUri(uint256)`
-    // the collectionUri **MUST** be immutable (e.g., ipfs:// and not http://)
-    // the collectionUri **MUST** be content addressable (e.g., ipfs:// and not http://)
-    // data from `badgeUri` takes precedence over data returned by this method
-    // any external links referenced by the content at `collectionUri` also **MUST** follow all of the above rules
-    function collectionUri()
-        external
-        pure
-        returns (string memory collectionUri);
-
-    // returns a censorship resistant URI with details about this badge instance
-    // the collectionUri **MUST** be immutable (e.g., ipfs:// and not http://)
-    // the collectionUri **MUST** be content addressable (e.g., ipfs:// and not http://)
-    // data from this takes precedence over data returned by `collectionUri`
-    // any external links referenced by the content at `badgeUri` also **MUST** follow all of the above rules
-    function tokenUri(
-        uint256 tokenId
-    ) external view returns (string memory tokenUri);
-
-    // returns a string that indicates the format of the `badgeUri` and `collectionUri` results (e.g., 'EIP-ABCD' or 'soulbound-schema-version-4')
-    function metadataFormat() external pure returns (string memory format);
-}
+import "./ERC725Storage.sol";
+import "./interfaces/ISoulAccount.sol";
+import "./interfaces/IERC5114.sol";
 
 contract ImpTheGoat is Ownable, IERC5114 {
     using Counters for Counters.Counter;
     using Strings for uint256;
-    ERC725 _tokenStorage;
+    ERC725Storage _tokenStorage;
 
     // Mapping from `Soul address, Soul tokenId` to token balance
     // mapping(address => mapping(uint256 => uint256)) internal _soulData;
@@ -107,7 +68,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
 
     mapping(bytes32 => bytes) private _store;
 
-    mapping(address => ERC725) public tokenData;
+    mapping(address => ERC725Storage) public tokenData;
 
     //this event is for querying, to get who owns what nft and what account is connected to it,
     //eventhough ERC6551 has its own event fot this purpose
@@ -116,6 +77,14 @@ contract ImpTheGoat is Ownable, IERC5114 {
         address indexed account,
         uint256 indexed tokenId
     );
+
+    event TransactionExecuted(
+        address indexed to,
+        uint indexed value,
+        bytes indexed data
+    );
+
+    error TransferFromOrToSoulAccount();
 
     string public collectionInfo;
     string public tokenInfo;
@@ -189,7 +158,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
         );
 
         // ERC725 newStorage = ERC725(newAccount);
-        ERC725 newStorage = tokenData[newAccount];
+        ERC725Storage newStorage = tokenData[newAccount];
         newStorage.setDataSingle(
             keccak256(abi.encode(msg.sender)),
             abi.encode(_soul, newAccount, _tokenId)
@@ -199,9 +168,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
     }
 
     //This returns the account assigned to the token
-    function showTokenAccount(
-        uint256 _tokenId
-    ) external view returns (address) {
+    function showTokenAccount(uint256 _tokenId) public view returns (address) {
         return
             erc6551Registry.account(
                 erc6551AccountImplementation,
@@ -268,7 +235,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
     ) public returns (bool) {
         address cont = address(tokenData[tokenAccount]);
         require(cont == address(0), "Instance already created");
-        ERC725 tkn = new ERC725();
+        ERC725Storage tkn = new ERC725Storage();
         tokenData[tokenAccount] = tkn;
         return true;
     }
@@ -278,7 +245,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
         bytes32 _key,
         bytes memory _value
     ) public {
-        ERC725 shard = tokenData[tokenAccount];
+        ERC725Storage shard = tokenData[tokenAccount];
         shard.setDataSingle(_key, _value);
     }
 
@@ -287,7 +254,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
         bytes32[] memory _key,
         bytes[] memory _value
     ) public {
-        ERC725 shard = tokenData[tokenAccount];
+        ERC725Storage shard = tokenData[tokenAccount];
         shard.setData(_key, _value);
     }
 
@@ -295,7 +262,7 @@ contract ImpTheGoat is Ownable, IERC5114 {
         address _addr,
         bytes32 _dataKey
     ) public view returns (bytes memory) {
-        ERC725 shard = tokenData[_addr];
+        ERC725Storage shard = tokenData[_addr];
         return shard.getData(_dataKey);
     }
 
@@ -303,7 +270,53 @@ contract ImpTheGoat is Ownable, IERC5114 {
         address _addr,
         bytes32[] memory _datakey
     ) public view returns (bytes[] memory) {
-        ERC725 shard = tokenData[_addr];
+        ERC725Storage shard = tokenData[_addr];
         return shard.getDataBulk(_datakey);
+    }
+
+    function transferFromOrToSoulAccount(
+        uint256 tokenId,
+        address to,
+        uint256 value,
+        bytes memory data
+    ) public payable returns (bytes memory result) {
+        require(
+            msg.sender == tokenToAddresses[tokenId],
+            "You do not own this Soul Token"
+        );
+
+        address tokenAccount = showTokenAccount(tokenId);
+
+        if (msg.value != 0 && value != 0) {
+            revert TransferFromOrToSoulAccount();
+        }
+
+        emit TransactionExecuted(to, msg.value, data);
+
+        if (msg.value != 0) {
+            result = ISoulAccount(payable(tokenAccount)).executeCall(
+                to,
+                msg.value,
+                data
+            );
+
+            if (result.length < 0) {
+                assembly {
+                    revert(add(result, 32), mload(result))
+                }
+            }
+        } else if (value != 0) {
+            result = ISoulAccount(payable(tokenAccount)).executeCall(
+                to,
+                value,
+                data
+            );
+
+            if (result.length < 0) {
+                assembly {
+                    revert(add(result, 32), mload(result))
+                }
+            }
+        }
     }
 }

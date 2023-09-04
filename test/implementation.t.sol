@@ -60,26 +60,15 @@ contract ImpTheGoat_Test is Test {
     function test__erc725DataStorage() public {
         implementation.safeMint();
         bytes32 key = keccak256(abi.encode(address(this)));
-        (address tokenAccount) = implementation.showTokenAccount(1);
+        address tokenAccount = implementation.showTokenAccount(1);
         emit log_named_address("tokenAccount", tokenAccount);
         bytes memory value = implementation.getData(tokenAccount, key);
         emit log_named_bytes("value", value);
-        assertEq(value.length, 24 + 20 + 20 + 32, "Invalid packed data length");
-        (address soul,
-        address newAccount,
-        uint256 tokenId) = abi.decode(value, (address, address, uint256));
-        // // Inline assembly for efficient decoding
-        // assembly {
-        //     // Load the 20 bytes starting from position 32 into 'soul'
-        //     soul := mload(add(value, 0x20))
-            
-        //     // Load the 20 bytes starting from position 52 into 'newAccount'
-        //     newAccount := mload(add(value, 0x34))
-            
-        //     // Load the 32 bytes starting from position 72 into 'tokenId'
-        //     tokenId := mload(add(value, 0x48))
-        // }
-        // // Add assertions to check if the value is as expected
+        assertEq(value.length, 24 + 20 + 20 + 32, "Invalid data length");
+        (address soul, address newAccount, uint256 tokenId) = abi.decode(
+            value,
+            (address, address, uint256)
+        );
 
         emit log_named_address("soul", soul);
         emit log_named_address("newAccount", newAccount);
@@ -103,4 +92,27 @@ contract ImpTheGoat_Test is Test {
     //     );
     //     // Add more metadata tests
     // }
+
+    function test__sendOrReceiveETH() public {
+        address randomBenefactor = address(0x123);
+        implementation.safeMint();
+
+        address tokenAccount = implementation.showTokenAccount(1);
+          emit log_named_uint("old balance",tokenAccount.balance);
+
+        //send 1 ether to tokenAccount
+        vm.deal(tokenAccount, 1 ether);
+
+        emit log_named_uint("new balance",tokenAccount.balance);
+
+        emit log_named_uint("this address old balance",randomBenefactor.balance);
+
+            //transfer 0.5 ether from tokenAccount to randomBenefactor
+        implementation.transferFromOrToSoulAccount(1, randomBenefactor, 0.5 ether, "");
+
+        emit log_named_uint("this address new balance",randomBenefactor.balance);
+        emit log_named_uint("new balance",tokenAccount.balance);
+    }
+
+    receive() external payable {}
 }

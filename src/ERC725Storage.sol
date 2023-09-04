@@ -10,7 +10,7 @@ import "./errors.sol";
 // constants
 import {_INTERFACEID_ERC725Y} from "./constants.sol";
 
-contract ERC725 is ERC165, IERC725Y {
+contract ERC725Storage is ERC165, IERC725Y {
     address public contractOwner;
 
     constructor() {
